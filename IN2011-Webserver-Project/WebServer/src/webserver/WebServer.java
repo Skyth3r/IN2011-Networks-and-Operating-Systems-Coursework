@@ -14,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import org.apache.http.client.utils.DateUtils;
 
@@ -34,10 +36,9 @@ public class WebServer {
                 Socket conn = serverSock.accept();
                 // get the input stream for receiving data from the client
                 InputStream is = conn.getInputStream();
-
-                   try{
-                    // read the request message 
-                       
+                
+                try{
+                    // read the request message  
                     Request req = Request.parse(is);      
                     String method = req.getMethod();
                    
@@ -47,75 +48,88 @@ public class WebServer {
                     Response msg;
      
                     if(method.startsWith("GET")){
+                        
+                        if(req.getVersion().equals(in2011.http.HTTPMessage.DEFAULT_HTTP_VERSION)){
                         String uri = req.getURI();
                         String ps = rootDir + uri;
                         Path myPath = Paths.get(ps).toAbsolutePath().normalize();
                         
                         try{
+                       // InputStream input = null;
                         InputStream input = Files.newInputStream(myPath);
-                        }catch(Exception e){
-                            msg = new Response(404); // Not found
-                            msg.write(os);
-                            conn.close();
-                            return;
-                        }
-                        
-                        System.out.println( "exists:"  + Files.exists(myPath));
-                        System.out.println( "can read:" + Files.isReadable(myPath));
-                        System.out.println( "can execute:" + Files.isExecutable(myPath) );
-                        System.out.println( "can write:" + Files.isWritable(myPath));
-                        
-                        if(Files.exists(myPath) && Files.isReadable(myPath) && Files.isExecutable(myPath) && Files.isWritable(myPath)){
-                            
-                        if(!req.getVersion().equals(in2011.http.HTTPMessage.DEFAULT_HTTP_VERSION)){
-                            
-                            msg = new Response(505);
-                            msg.write(os);
-                            conn.close();
-                            return;
-                        }
 
+                        
                         BasicFileAttributes attr = Files.readAttributes(myPath, BasicFileAttributes.class);
-                        System.out.println(!String.valueOf(Files.getLastModifiedTime(myPath)).equals(attr.creationTime()));
-                        System.out.println("Creation Time" + attr.creationTime());
-                        System.out.println("Modified" + Files.getLastModifiedTime(myPath));
+                        
 
-                        if(!String.valueOf(Files.getLastModifiedTime(myPath)).equals(attr.creationTime())){
-                            msg = new Response(304);
+                        FileTime lastAccess = attr.lastAccessTime();
+                        FileTime lastModified = Files.getLastModifiedTime(myPath);
+                        SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH-mm-ss");
+                        String access = df.format(lastAccess.toMillis());
+                        String modified = df.format(lastModified.toMillis());
+                        System.out.println(df.parse(modified).before(df.parse(access)));
+                        
+                        System.out.println(access);
+                        System.out.println(modified);
+                        
+                        if(df.parse(modified).before(df.parse(access))){
+                            msg = new Response(304); // NOT MODFIED
                             msg.write(os); 
                             conn.close();
-                            return;
-                        } 
-     
+
+                        } else {
+
                         msg = new Response(200); // OKAY
                         msg.write(os);
     
                         byte[] data = Files.readAllBytes(myPath);                    
                         os.write(data);  
-                        
-                        } else {
-                            msg = new Response(403); // Forbidden
-                            msg.write(os);
                         }
+                      
+                        }catch(Exception e){
+                            
+                        if(e.toString().equals("java.nio.file.AccessDeniedException: " + myPath)){
+                            msg = new Response(403); // forbidden
+                            msg.write(os);
+                            conn.close();
+                            
+                         } else {
+                             msg = new Response(404); // Not found
+                             msg.write(os);
+                             conn.close();
+                         }
+                             
+                        }
+
+                        }else{   
+                            msg = new Response(505); //not http1
+                            msg.write(os);
+                            conn.close();
+                            
+                        }
+                        
                         
                    } else {
                         msg = new Response(501); // Not implemented.
                         msg.write(os);
                     }
                     }catch(Exception e){
+                        
                         OutputStream os = conn.getOutputStream();
                         Response msg;
-                        msg = new Response(500);
+                        msg = new Response(500); // Internal server error
                         msg.write(os);
                     }
 
                 } catch (MessageFormatException ex) {
                     OutputStream os = conn.getOutputStream();
                     Response msg;
-                    msg = new Response(400); // Internal server error
+                    msg = new Response(400); // Bad request
                     msg.write(os);
                 }
+                if(!conn.isClosed()){
                 conn.close();
+                }
             }
     }
 
